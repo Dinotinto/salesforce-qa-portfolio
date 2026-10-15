@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <!--
+        Case org-wide defaults are set to Private so the security suite can prove
+        that agents only see their own cases (plus anything explicitly shared).
+    -->
+    <externalSharingModel>Private</externalSharingModel>
+    <sharingModel>Private</sharingModel>
+</CustomObject>

@@ -1,0 +1,27 @@
+# Salesforce CLI
+.sf/
+.sfdx/
+.localdevserver/
+
+# Node / Playwright
+node_modules/
+ui-tests/state/
+ui-tests/playwright-report/
+ui-tests/results/
+ui-tests/test-results/
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+
+# Reports and generated files
+reports/
+agent-tests/results/
+agent-tests/specs/case-agent-tests.yaml
+
+# Secrets: never commit these
+*.key
+authurl*
+.env

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <classAccesses>
+        <apexClass>EscalateCaseAction</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>GetCaseStatusAction</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <description>Assign to the Agentforce Service Agent&apos;s running user. Grants only the two case actions; the actions themselves verify the customer before reading or changing a case.</description>
+    <hasActivationRequired>false</hasActivationRequired>
+    <label>Case Agent Actions</label>
+</PermissionSet>

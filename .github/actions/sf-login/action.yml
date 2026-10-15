@@ -1,0 +1,50 @@
+name: Salesforce login
+description: >-
+  Installs the Salesforce CLI, logs in with an SFDX auth URL and exports
+  SF_INSTANCE_URL / SF_ACCESS_TOKEN (masked) / SF_USERNAME for later steps.
+inputs:
+  auth-url:
+    description: SFDX auth URL (from `sf org display --verbose --json`), passed in from a secret
+    required: true
+  alias:
+    description: Org alias
+    default: qa-org
+  env-prefix:
+    description: Prefix for the exported variables (e.g. SF_VIEWER_ for a second persona)
+    default: SF_
+  install-cli:
+    description: Install the Salesforce CLI first
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Install Salesforce CLI
+      if: inputs.install-cli == 'true'
+      shell: bash
+      run: npm install --global @salesforce/cli@2 && sf version
+
+    - name: Log in
+      shell: bash
+      env:
+        AUTH_URL: ${{ inputs.auth-url }}
+        ALIAS: ${{ inputs.alias }}
+        PREFIX: ${{ inputs.env-prefix }}
+      run: |
+        if [ -z "$AUTH_URL" ]; then
+          echo "::error::The Salesforce auth URL secret is empty. See README > CI setup."
+          exit 1
+        fi
+        umask 077
+        printf '%s' "$AUTH_URL" > "$RUNNER_TEMP/authurl"
+        sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/authurl" --alias "$ALIAS" --set-default > /dev/null
+        rm -f "$RUNNER_TEMP/authurl"
+
+        ORG_JSON=$(sf org display --target-org "$ALIAS" --json)
+        TOKEN=$(jq -r .result.accessToken <<< "$ORG_JSON")
+        echo "::add-mask::$TOKEN"
+        {
+          echo "${PREFIX}ACCESS_TOKEN=$TOKEN"
+          echo "${PREFIX}INSTANCE_URL=$(jq -r .result.instanceUrl <<< "$ORG_JSON")"
+          echo "${PREFIX}USERNAME=$(jq -r .result.username <<< "$ORG_JSON")"
+        } >> "$GITHUB_ENV"
+        echo "Logged in to $(jq -r .result.instanceUrl <<< "$ORG_JSON") as $(jq -r .result.username <<< "$ORG_JSON")"

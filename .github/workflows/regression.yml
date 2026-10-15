@@ -1,0 +1,229 @@
+name: Salesforce regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 4 * * 1-5" # 05:47 Lagos time, weekdays
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+# One shared org: never let two pipelines run against it at the same time.
+concurrency:
+  group: salesforce-qa-org
+  cancel-in-progress: false
+
+env:
+  SF_API_VERSION: "64.0"
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.12"
+  APEX_TESTS: CaseServiceTest CaseSecurityTest CaseAgentActionsTest
+
+jobs:
+  deploy-and-apex:
+    name: Deploy + Apex (functional & role-based security)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: ./.github/actions/sf-login
+        with:
+          auth-url: ${{ secrets.SF_AUTH_URL }}
+
+      - name: Deploy metadata
+        run: |
+          TESTS=$(for t in $APEX_TESTS; do printf -- '--tests %s ' "$t"; done)
+          sf project deploy start --source-dir force-app --target-org qa-org \
+            --test-level RunSpecifiedTests $TESTS --wait 30 --verbose
+
+      - name: Give the CI user the Support Agent permission set
+        run: |
+          sf org assign permset --name Support_Agent --target-org qa-org \
+            || echo "Already assigned (or assignment not needed)"
+
+      - name: Run Apex tests with coverage
+        run: |
+          mkdir -p reports/apex
+          CLASSES=$(for t in $APEX_TESTS; do printf -- '--class-names %s ' "$t"; done)
+          sf apex run test $CLASSES --code-coverage --result-format junit \
+            --output-dir reports/apex --wait 30 --target-org qa-org
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apex-reports
+          path: reports/apex
+          if-no-files-found: ignore
+
+  api-tests:
+    name: REST API (pytest)
+    needs: deploy-and-apex
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HAS_VIEWER_PERSONA: ${{ secrets.SF_VIEWER_AUTH_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: ./.github/actions/sf-login
+        with:
+          auth-url: ${{ secrets.SF_AUTH_URL }}
+
+      # Optional second persona: a user with only the Support_Viewer permission set.
+      - name: Log in as the Support Viewer persona
+        if: env.HAS_VIEWER_PERSONA == 'true'
+        uses: ./.github/actions/sf-login
+        with:
+          auth-url: ${{ secrets.SF_VIEWER_AUTH_URL }}
+          alias: viewer
+          env-prefix: SF_VIEWER_
+          install-cli: "false"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: api-tests/requirements.txt
+      - run: pip install -r api-tests/requirements.txt
+
+      - name: Run API, contract, security and performance tests
+        working-directory: api-tests
+        run: |
+          pytest --junitxml=../reports/api/junit.xml \
+                 --html=../reports/api/report.html --self-contained-html
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-reports
+          path: reports/api
+
+  ui-tests:
+    name: UI (Playwright)
+    needs: deploy-and-apex
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ui-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: ./.github/actions/sf-login
+        with:
+          auth-url: ${{ secrets.SF_AUTH_URL }}
+
+      - run: npm install --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npx playwright install --with-deps chromium
+      - name: Run Playwright
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-reports
+          path: |
+            ui-tests/playwright-report
+            ui-tests/results
+
+  agent-tests:
+    name: Agentforce (Testing Center + side effects)
+    needs: deploy-and-apex
+    # Turn on by setting the repository variable AGENT_API_NAME to the agent's API name.
+    if: ${{ vars.AGENT_API_NAME != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: ./.github/actions/sf-login
+        with:
+          auth-url: ${{ secrets.SF_AUTH_URL }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: api-tests/requirements.txt
+      - run: pip install -r api-tests/requirements.txt
+
+      - name: Seed known customers and cases
+        run: sf apex run --file scripts/seed-agent-data.apex --target-org qa-org
+
+      - name: Render the test spec with the seeded case numbers
+        run: python agent-tests/render_spec.py --agent "${{ vars.AGENT_API_NAME }}"
+
+      - name: Create / update the Testing Center test
+        run: |
+          sf agent test create --spec agent-tests/specs/case-agent-tests.yaml \
+            --api-name Case_Agent_Regression --force-overwrite --target-org qa-org
+
+      - name: Run the agent tests
+        run: |
+          mkdir -p reports/agent
+          sf agent test run --api-name Case_Agent_Regression --wait 30 \
+            --result-format junit --output-dir reports/agent --target-org qa-org
+
+      - name: Check side effects (and multi-turn conversations if the Agent API is configured)
+        if: always()
+        working-directory: agent-tests
+        env:
+          AGENT_API_MY_DOMAIN: ${{ vars.AGENT_API_MY_DOMAIN }}
+          AGENT_API_AGENT_ID: ${{ vars.AGENT_API_AGENT_ID }}
+          AGENT_API_CLIENT_ID: ${{ secrets.AGENT_API_CLIENT_ID }}
+          AGENT_API_CLIENT_SECRET: ${{ secrets.AGENT_API_CLIENT_SECRET }}
+        run: pytest --junitxml=../reports/agent/side-effects-junit.xml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-reports
+          path: |
+            reports/agent
+            agent-tests/results
+            agent-tests/specs/case-agent-tests.yaml
+
+  report:
+    name: Test report
+    needs: [deploy-and-apex, api-tests, ui-tests, agent-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: reports
+      - name: Publish JUnit results
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: reports/**/*.xml
+          include_passed: true
+          detailed_summary: true
+          check_name: Salesforce regression results
+      - name: Job summary
+        run: |
+          {
+            echo "## Salesforce regression"
+            echo ""
+            echo "| Suite | Result |"
+            echo "|---|---|"
+            echo "| Deploy + Apex | ${{ needs.deploy-and-apex.result }} |"
+            echo "| REST API | ${{ needs.api-tests.result }} |"
+            echo "| UI (Playwright) | ${{ needs.ui-tests.result }} |"
+            echo "| Agentforce | ${{ needs.agent-tests.result }} |"
+            echo ""
+            echo "HTML reports (Playwright, pytest) are attached to this run as artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"

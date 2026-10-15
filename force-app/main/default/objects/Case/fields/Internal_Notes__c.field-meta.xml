@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Internal_Notes__c</fullName>
+    <description>Internal-only notes. Visible to Support Agents, hidden from Support Viewers and from the customer-facing agent. Used by the field-level security tests.</description>
+    <inlineHelpText>Internal-only notes. Never shown to customers.</inlineHelpText>
+    <label>Internal Notes</label>
+    <length>32768</length>
+    <type>LongTextArea</type>
+    <visibleLines>5</visibleLines>
+</CustomField>
