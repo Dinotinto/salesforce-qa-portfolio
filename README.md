@@ -10,7 +10,7 @@ What the latest green CI run actually executed, as opposed to what is built and 
 |---|---|
 | Apex functional, security and agent-action guardrails | ✅ Verified in CI |
 | Python REST API (lifecycle, negative, performance, config drift) | ✅ Verified in CI |
-| Playwright UI (Chromium) | ✅ Verified in CI |
+| Playwright UI (Chromium) | ✅ Verified in CI, no flaky retries in the latest run |
 | Playwright on Firefox / WebKit | ⏳ Opt-in locally (`PW_ALL_BROWSERS=1`), not run in CI |
 | Restricted viewer persona (API, as a real Support Viewer user) | ⏳ Implemented, skipped until `SF_VIEWER_AUTH_URL` is configured |
 | Agentforce Testing Center | ⏳ Implemented, awaiting an agent in the CI org (`AGENT_API_NAME`) |
@@ -173,5 +173,6 @@ sf apex run test -n CaseServiceTest -n CaseSecurityTest -n CaseAgentActionsTest 
 - **Oracles over screenshots.** UI tests check stored data over REST, because a UI can look right and still save the wrong values.
 - **LLM assertions are about facts, not wording.** They check case numbers, statuses and leaked secrets, plus record side effects, so tests survive prompt tweaks.
 - **Customer verification.** Identity comes from the session, not the conversation. What the platform considers "verified" depends on how the messaging channel authenticates end users (an authenticated deployment, or the *Customer Verification* topic linking the end user to a contact). The actions only trust `MessagingEndUser.ContactId`, so whichever method the org uses, a typed claim can't change it.
-- **Dependencies.** `ui-tests` pins its direct dependencies exactly. CI installs with `npm ci`; until a `package-lock.json` is committed, it generates one first and uploads it with the reports.
+- **Dependencies.** `ui-tests` pins its direct dependencies and commits `package-lock.json`; CI installs with `npm ci`.
+- **Flakiness is visible.** CI retries a failed UI test once, and any test that only passes on retry is flagged as a *Flaky UI test* warning on the run, instead of hiding behind a green tick.
 - **Browsers.** CI runs Chromium only, so this is not yet a cross-browser verified suite.
