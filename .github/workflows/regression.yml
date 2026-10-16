@@ -20,7 +20,7 @@ concurrency:
 
 env:
   SF_API_VERSION: "64.0"
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
   APEX_TESTS: CaseServiceTest CaseSecurityTest CaseAgentActionsTest
 
