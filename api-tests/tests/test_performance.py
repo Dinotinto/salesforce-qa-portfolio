@@ -9,11 +9,19 @@ pytestmark = pytest.mark.performance
 
 READ_P95_BUDGET_S = float(os.environ.get("READ_P95_BUDGET_S", "2.5"))
 WRITE_P95_BUDGET_S = float(os.environ.get("WRITE_P95_BUDGET_S", "3.5"))
-SAMPLES = int(os.environ.get("PERF_SAMPLES", "10"))
+# 30 samples by default: with only 10, the 95th percentile is effectively the max.
+SAMPLES = int(os.environ.get("PERF_SAMPLES", "30"))
 
 
 def p95(values: list[float]) -> float:
-    return statistics.quantiles(values, n=20)[-1] if len(values) >= 2 else values[0]
+    """95th percentile, interpolated within the observed range.
+
+    The default "exclusive" method can extrapolate beyond the slowest sample on
+    small sets, which overstates p95; "inclusive" never exceeds max(values).
+    """
+    if len(values) < 2:
+        return values[0]
+    return statistics.quantiles(values, n=20, method="inclusive")[-1]
 
 
 def test_case_read_p95_within_budget(sf, make_case):

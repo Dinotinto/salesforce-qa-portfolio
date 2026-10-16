@@ -59,6 +59,21 @@ private class CaseServiceTest {
     }
 
     @IsTest
+    static void escalatingTwiceKeepsTheOriginalReason() {
+        System.runAs(CaseTestFactory.persona('agent')) {
+            Case c = CaseService.createCase('Escalate twice', null, null, 'Low');
+            CaseService.escalate(c.Id, 'First reason');
+            Datetime stampAfterFirst = [SELECT SystemModstamp FROM Case WHERE Id = :c.Id].SystemModstamp;
+
+            Case second = CaseService.escalate(c.Id, 'Second reason');
+            Assert.areEqual('Escalated', second.Status);
+            Assert.areEqual('First reason', second.Escalation_Reason__c, 'Original reason must be kept');
+            Assert.areEqual(stampAfterFirst, [SELECT SystemModstamp FROM Case WHERE Id = :c.Id].SystemModstamp,
+                'A repeat escalation must not write to the record');
+        }
+    }
+
+    @IsTest
     static void closedCaseCannotBeEscalated() {
         System.runAs(CaseTestFactory.persona('agent')) {
             Case c = CaseService.createCase('Resolved already', null, null, null);

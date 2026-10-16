@@ -14,6 +14,11 @@ public with sharing class CaseService {
     public static final String STATUS_ESCALATED = 'Escalated';
     public static final String STATUS_CLOSED = 'Closed';
 
+    /** One definition of "already escalated", shared by the service and the agent actions. */
+    public static Boolean isEscalated(Case c) {
+        return c != null && c.Status == STATUS_ESCALATED;
+    }
+
     public static Case createCase(String subject, String description, Id accountId, String priority) {
         if (String.isBlank(subject)) {
             throw new CaseServiceException('Subject is required.');
@@ -54,6 +59,10 @@ public with sharing class CaseService {
         Case c = getCase(caseId);
         if (c.IsClosed) {
             throw new CaseServiceException('Closed cases cannot be escalated.');
+        }
+        if (isEscalated(c)) {
+            // Idempotent, like EscalateCaseAction: keep the original reason and leave the record untouched.
+            return c;
         }
         Case changes = new Case(
             Id = c.Id,

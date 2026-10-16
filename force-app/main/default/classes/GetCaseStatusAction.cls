@@ -1,5 +1,9 @@
 /**
- * Agentforce action: tell a verified customer the status of their case.
+ * Agentforce action: tell a verified customer the status of their own case.
+ *
+ * Identity comes from the conversation's session (a context variable the agent
+ * maps from the MessagingSession), resolved by CustomerIdentity. There is no
+ * email or name input, so nothing the customer types can change who they are.
  */
 public with sharing class GetCaseStatusAction {
 
@@ -7,8 +11,8 @@ public with sharing class GetCaseStatusAction {
         @InvocableVariable(label='Case Number' description='The case number the customer gave, for example 00001026 or 1026.' required=true)
         public String caseNumber;
 
-        @InvocableVariable(label='Verified Customer Email' description='The email address the customer verified earlier in this conversation.' required=true)
-        public String customerEmail;
+        @InvocableVariable(label='Session Id' description='Trusted context: map from the conversation\'s MessagingSession Id. Never fill from customer input.' required=true)
+        public String sessionId;
     }
 
     public class Result {
@@ -33,7 +37,7 @@ public with sharing class GetCaseStatusAction {
 
     @InvocableMethod(
         label='Get Case Status'
-        description='Looks up the status of a support case for a verified customer. Never returns details of a case that belongs to someone else.'
+        description='Looks up the status of a support case for the verified customer in this conversation. Never returns details of a case that belongs to someone else.'
         category='Case Management'
     )
     public static List<Result> getStatus(List<Request> requests) {
@@ -49,8 +53,9 @@ public with sharing class GetCaseStatusAction {
         List<Result> results = new List<Result>();
         for (Request req : requests) {
             Case c = cases.get(CaseAgentGateway.normalizeCaseNumber(req.caseNumber));
+            Id contactId = CustomerIdentity.verifiedContactId(req.sessionId);
             Result r = new Result();
-            if (!CaseAgentGateway.isVerifiedContact(c, req.customerEmail)) {
+            if (!CaseAgentGateway.belongsTo(c, contactId)) {
                 r.found = false;
                 r.message = CaseAgentGateway.NOT_FOUND_MESSAGE;
             } else {

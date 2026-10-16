@@ -22,7 +22,7 @@ env:
   SF_API_VERSION: "64.0"
   NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
-  APEX_TESTS: CaseServiceTest CaseSecurityTest CaseAgentActionsTest
+  APEX_TESTS: CaseServiceTest CaseSecurityTest CaseAgentActionsTest CustomerIdentityTest
 
 jobs:
   deploy-and-apex:
@@ -157,7 +157,16 @@ jobs:
         with:
           auth-url: ${{ secrets.SF_AUTH_URL }}
 
-      - run: npm install --no-audit --no-fund
+      - name: Install dependencies (locked)
+        # Direct dependencies are pinned exactly in package.json. When the lockfile is
+        # committed this is a plain `npm ci`; until then CI resolves one first and
+        # uploads it with the reports so it can be committed.
+        run: |
+          if [ ! -f package-lock.json ]; then
+            echo "::notice::No package-lock.json committed; generating one for this run."
+            npm install --package-lock-only --no-audit --no-fund
+          fi
+          npm ci --no-audit --no-fund
       - run: npx tsc --noEmit
       - run: npx playwright install --with-deps chromium
       - name: Run Playwright
@@ -170,6 +179,7 @@ jobs:
           path: |
             ui-tests/playwright-report
             ui-tests/results
+            ui-tests/package-lock.json
 
   agent-tests:
     name: Agentforce (Testing Center + side effects)
@@ -178,6 +188,12 @@ jobs:
     if: ${{ vars.AGENT_API_NAME != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      # Every seeded case carries this tag; cleanup deletes only this run's own cases.
+      AGENT_RUN_TAG: gh-${{ github.run_id }}-${{ github.run_attempt }}
+      # Optional: a verified MessagingSession linked to Ada's contact. Without it only the
+      # unverified (identity-spoofing) cases run.
+      AGENT_ADA_SESSION_ID: ${{ vars.AGENT_ADA_SESSION_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -194,7 +210,9 @@ jobs:
       - run: pip install -r api-tests/requirements.txt
 
       - name: Seed known customers and cases
-        run: sf apex run --file scripts/seed-agent-data.apex --target-org qa-org
+        run: |
+          sed "s/__RUN_TAG__/${AGENT_RUN_TAG}/" scripts/seed-agent-data.apex > "$RUNNER_TEMP/seed.apex"
+          sf apex run --file "$RUNNER_TEMP/seed.apex" --target-org qa-org
 
       - name: Render the test spec with the seeded case numbers
         run: python agent-tests/render_spec.py --agent "${{ vars.AGENT_API_NAME }}"
@@ -219,6 +237,12 @@ jobs:
           AGENT_API_CLIENT_ID: ${{ secrets.AGENT_API_CLIENT_ID }}
           AGENT_API_CLIENT_SECRET: ${{ secrets.AGENT_API_CLIENT_SECRET }}
         run: pytest --junitxml=../reports/agent/side-effects-junit.xml
+
+      - name: Remove this run's seeded cases
+        if: always()
+        run: |
+          sed "s/__RUN_TAG__/${AGENT_RUN_TAG}/" scripts/cleanup-agent-data.apex > "$RUNNER_TEMP/cleanup.apex"
+          sf apex run --file "$RUNNER_TEMP/cleanup.apex" --target-org qa-org
 
       - uses: actions/upload-artifact@v4
         if: always()

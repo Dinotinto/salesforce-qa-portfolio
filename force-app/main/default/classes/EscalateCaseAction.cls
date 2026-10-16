@@ -1,11 +1,12 @@
 /**
- * Agentforce action: escalate a verified customer's open case.
+ * Agentforce action: escalate the verified customer's open case.
  *
  * Guardrails (each one has a matching Apex test and agent test):
- *   - the customer must be the case's contact, otherwise nothing changes;
+ *   - the customer is identified from trusted session context, not conversation text;
+ *   - the case must belong to that customer, otherwise nothing changes;
  *   - closed cases are never reopened or escalated;
  *   - a reason is required, so every escalation is explainable;
- *   - an already-escalated case is not updated again.
+ *   - escalation is idempotent: an already-escalated case is not updated again.
  */
 public with sharing class EscalateCaseAction {
 
@@ -13,8 +14,8 @@ public with sharing class EscalateCaseAction {
         @InvocableVariable(label='Case Number' description='The case number the customer gave.' required=true)
         public String caseNumber;
 
-        @InvocableVariable(label='Verified Customer Email' description='The email address the customer verified earlier in this conversation.' required=true)
-        public String customerEmail;
+        @InvocableVariable(label='Session Id' description='Trusted context: map from the conversation\'s MessagingSession Id. Never fill from customer input.' required=true)
+        public String sessionId;
 
         @InvocableVariable(label='Reason' description='The customer\'s reason for escalating, in their own words.' required=true)
         public String reason;
@@ -33,7 +34,7 @@ public with sharing class EscalateCaseAction {
 
     @InvocableMethod(
         label='Escalate Case'
-        description='Escalates an open support case for a verified customer and records why. Refuses closed cases and cases that belong to someone else.'
+        description='Escalates an open support case for the verified customer in this conversation and records why. Refuses closed cases and cases that belong to someone else.'
         category='Case Management'
     )
     public static List<Result> escalate(List<Request> requests) {
@@ -50,10 +51,11 @@ public with sharing class EscalateCaseAction {
         List<Result> results = new List<Result>();
         for (Request req : requests) {
             Case c = cases.get(CaseAgentGateway.normalizeCaseNumber(req.caseNumber));
+            Id contactId = CustomerIdentity.verifiedContactId(req.sessionId);
             Result r = new Result();
             r.escalated = false;
 
-            if (!CaseAgentGateway.isVerifiedContact(c, req.customerEmail)) {
+            if (!CaseAgentGateway.belongsTo(c, contactId)) {
                 r.message = CaseAgentGateway.NOT_FOUND_MESSAGE;
             } else if (c.IsClosed) {
                 r.status = c.Status;
@@ -62,7 +64,7 @@ public with sharing class EscalateCaseAction {
             } else if (String.isBlank(req.reason)) {
                 r.status = c.Status;
                 r.message = 'Please tell me why you\'d like case ' + c.CaseNumber + ' escalated.';
-            } else if (c.Status == CaseService.STATUS_ESCALATED || toEscalate.containsKey(c.Id)) {
+            } else if (CaseService.isEscalated(c) || toEscalate.containsKey(c.Id)) {
                 r.status = CaseService.STATUS_ESCALATED;
                 r.message = 'Case ' + c.CaseNumber + ' is already escalated. A specialist is reviewing it.';
             } else {
