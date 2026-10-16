@@ -165,6 +165,8 @@ jobs:
           if [ ! -f package-lock.json ]; then
             echo "::notice::No package-lock.json committed; generating one for this run."
             npm install --package-lock-only --no-audit --no-fund
+            # Publish it on the run summary (gzip + base64) so it can be reviewed and committed.
+            echo "::notice title=package-lock.json (gzip+base64)::$(gzip -9c package-lock.json | base64 -w0)"
           fi
           npm ci --no-audit --no-fund
       - run: npx tsc --noEmit

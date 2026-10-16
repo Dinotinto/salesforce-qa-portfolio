@@ -56,13 +56,21 @@ public with sharing class CaseService {
         if (String.isBlank(reason)) {
             throw new CaseServiceException('An escalation reason is required.');
         }
-        Case c = getCase(caseId);
+        // Lock the row before checking its status, so two concurrent escalations can't both
+        // see "not escalated" and the second overwrite the first reason (same as CaseAgentGateway).
+        List<Case> locked = [
+            SELECT Id, Status, IsClosed FROM Case WHERE Id = :caseId WITH USER_MODE LIMIT 1 FOR UPDATE
+        ];
+        if (locked.isEmpty()) {
+            throw new CaseServiceException('Case not found or you do not have access to it.');
+        }
+        Case c = locked[0];
         if (c.IsClosed) {
             throw new CaseServiceException('Closed cases cannot be escalated.');
         }
         if (isEscalated(c)) {
             // Idempotent, like EscalateCaseAction: keep the original reason and leave the record untouched.
-            return c;
+            return getCase(caseId);
         }
         Case changes = new Case(
             Id = c.Id,
