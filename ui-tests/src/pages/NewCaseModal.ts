@@ -66,8 +66,11 @@ export class NewCaseModal {
   }
 
   async expectRequiredFieldError(fieldLabel: string): Promise<void> {
-    // The field is flagged inline in every org; some orgs also show a "We hit a snag." summary.
-    await expect(this.dialog.getByRole('combobox', { name: fieldLabel })).toHaveAttribute('aria-invalid', 'true');
+    // The field is flagged inline in every org; some orgs also show a "We hit a snag." popover.
+    // While that popover has focus Lightning can mark the modal aria-hidden, so these checks
+    // use DOM attributes and text rather than accessibility-tree roles.
+    const field = this.dialog.locator('lightning-combobox').filter({ hasText: fieldLabel }).first();
+    await expect(field.locator('[aria-invalid="true"]').first()).toBeAttached();
     await expect(this.dialog.getByText('Complete this field.').first()).toBeVisible();
     await expect(this.dialog, 'The modal must stay open when validation fails').toBeVisible();
     await expect(this.page, 'No record page should open').not.toHaveURL(/\/lightning\/r\//);
