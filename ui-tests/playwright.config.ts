@@ -19,6 +19,7 @@ export default defineConfig({
     ['list'],
     ['html', { outputFolder: 'playwright-report', open: 'never' }],
     ['junit', { outputFile: 'results/junit.xml' }],
+    ['json', { outputFile: 'results/results.json' }],
   ],
   use: {
     baseURL: lightningUrl(),
