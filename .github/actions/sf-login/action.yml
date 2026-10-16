@@ -21,7 +21,9 @@ runs:
     - name: Install Salesforce CLI
       if: inputs.install-cli == 'true'
       shell: bash
-      run: npm install --global @salesforce/cli@2 && sf version
+      run: |
+        npm install --global @salesforce/cli@2 || { echo "::error::Installing the Salesforce CLI failed"; exit 1; }
+        sf version
 
     - name: Log in
       shell: bash
@@ -34,10 +36,24 @@ runs:
           echo "::error::The Salesforce auth URL secret is empty. See README > CI setup."
           exit 1
         fi
+        # Tolerate stray whitespace/quotes from copy-paste, then sanity-check the shape
+        # (without ever printing the value).
+        AUTH_URL=$(printf '%s' "$AUTH_URL" | tr -d '\r\n' | sed -e 's/^[[:space:]"]*//' -e 's/[[:space:]"]*$//')
+        case "$AUTH_URL" in
+          force://*@*) ;;
+          *)
+            echo "::error::The auth URL secret doesn't look like an SFDX auth URL. It must start with force:// and contain an @ (length ${#AUTH_URL}). Re-copy the 'Sfdx Auth Url' value from 'sf org display --verbose'."
+            exit 1 ;;
+        esac
         umask 077
         printf '%s' "$AUTH_URL" > "$RUNNER_TEMP/authurl"
-        sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/authurl" --alias "$ALIAS" --set-default > /dev/null
-        rm -f "$RUNNER_TEMP/authurl"
+        if ! sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/authurl" --alias "$ALIAS" --set-default --json > "$RUNNER_TEMP/login.json" 2>&1; then
+          MSG=$(jq -r '.message // .name // "unknown error"' "$RUNNER_TEMP/login.json" 2>/dev/null | head -c 400)
+          echo "::error::Salesforce login failed: ${MSG}"
+          rm -f "$RUNNER_TEMP/authurl" "$RUNNER_TEMP/login.json"
+          exit 1
+        fi
+        rm -f "$RUNNER_TEMP/authurl" "$RUNNER_TEMP/login.json"
 
         ORG_JSON=$(sf org display --target-org "$ALIAS" --json)
         TOKEN=$(jq -r .result.accessToken <<< "$ORG_JSON")
