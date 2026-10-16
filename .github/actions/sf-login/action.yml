@@ -55,12 +55,25 @@ runs:
         fi
         rm -f "$RUNNER_TEMP/authurl" "$RUNNER_TEMP/login.json"
 
-        ORG_JSON=$(sf org display --target-org "$ALIAS" --json)
-        TOKEN=$(jq -r .result.accessToken <<< "$ORG_JSON")
+        # Read JSON only from stdout; warnings go to stderr.
+        ORG_JSON=$(sf org display --target-org "$ALIAS" --json 2>/dev/null) || true
+        INSTANCE=$(jq -r '.result.instanceUrl // empty' <<< "$ORG_JSON" 2>/dev/null || true)
+        USERNAME=$(jq -r '.result.username // empty' <<< "$ORG_JSON" 2>/dev/null || true)
+
+        # Newer CLI versions redact the token in 'org display'; ask for it explicitly.
+        TOKEN=$(sf org auth show-access-token --target-org "$ALIAS" --json 2>/dev/null \
+                | jq -r '.result.accessToken // .result.token // empty' 2>/dev/null || true)
+        if [ -z "$TOKEN" ] || [[ "$TOKEN" == \[REDACTED* ]]; then
+          TOKEN=$(jq -r '.result.accessToken // empty' <<< "$ORG_JSON" 2>/dev/null || true)
+        fi
+        if [ -z "$TOKEN" ] || [[ "$TOKEN" == \[REDACTED* ]] || [ -z "$INSTANCE" ]; then
+          echo "::error::Logged in, but couldn't read the access token or instance URL from the Salesforce CLI ($(sf version 2>/dev/null | head -1))."
+          exit 1
+        fi
         echo "::add-mask::$TOKEN"
         {
           echo "${PREFIX}ACCESS_TOKEN=$TOKEN"
-          echo "${PREFIX}INSTANCE_URL=$(jq -r .result.instanceUrl <<< "$ORG_JSON")"
-          echo "${PREFIX}USERNAME=$(jq -r .result.username <<< "$ORG_JSON")"
+          echo "${PREFIX}INSTANCE_URL=$INSTANCE"
+          echo "${PREFIX}USERNAME=$USERNAME"
         } >> "$GITHUB_ENV"
-        echo "Logged in to $(jq -r .result.instanceUrl <<< "$ORG_JSON") as $(jq -r .result.username <<< "$ORG_JSON")"
+        echo "Logged in to $INSTANCE as $USERNAME"
