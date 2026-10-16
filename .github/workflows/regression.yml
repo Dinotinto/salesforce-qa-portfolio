@@ -41,8 +41,23 @@ jobs:
       - name: Deploy metadata
         run: |
           TESTS=$(for t in $APEX_TESTS; do printf -- '--tests %s ' "$t"; done)
+          set +e
           sf project deploy start --source-dir force-app --target-org qa-org \
-            --test-level RunSpecifiedTests $TESTS --wait 30 --verbose
+            --test-level RunSpecifiedTests $TESTS --wait 30 --json > deploy.json 2>/dev/null
+          STATUS=$?
+          set -e
+          # Turn every component error and failing test into a visible annotation.
+          jq -r '
+            (.result.details.componentFailures // [] | if type=="object" then [.] else . end | .[]
+              | "::error file=\(.fileName // "force-app")::\(.componentType // "") \(.fullName // ""): \(.problem // "")"),
+            (.result.details.runTestResult.failures // [] | if type=="object" then [.] else . end | .[]
+              | "::error::Apex test \(.name).\(.methodName): \(.message // "") \((.stackTrace // "") | split("\n")[0])"),
+            (.result.details.runTestResult.codeCoverageWarnings // [] | if type=="object" then [.] else . end | .[]
+              | "::error::Coverage: \(.name // ""): \(.message // "")"),
+            (if (.status // 0) != 0 and (.result == null) then "::error::Deploy failed: \(.message // .name // "unknown")" else empty end)
+          ' deploy.json || true
+          jq -r '.result | "Deploy status: \(.status // "?"), components \(.numberComponentsDeployed // 0)/\(.numberComponentsTotal // 0), tests \(.numberTestsCompleted // 0) passed, \(.numberTestErrors // 0) failed"' deploy.json || true
+          exit $STATUS
 
       - name: Give the CI user the Support Agent permission set
         run: |
