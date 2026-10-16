@@ -53,8 +53,9 @@ export class NewCaseModal {
   /** Saves and waits for the record page; returns the new case's Id. */
   async saveAndGetId(): Promise<string> {
     await this.save();
-    await this.page.waitForURL(/\/lightning\/r\/Case\/500[A-Za-z0-9]{12,15}\/view/);
-    const match = this.page.url().match(/\/Case\/(500[A-Za-z0-9]{12,15})\//);
+    // Lightning uses /lightning/r/Case/<id>/view or the shorter /lightning/r/<id>/view.
+    await this.page.waitForURL(/\/lightning\/r\/(?:Case\/)?500[A-Za-z0-9]{12,15}\/view/);
+    const match = this.page.url().match(/\/r\/(?:Case\/)?(500[A-Za-z0-9]{12,15})\//);
     if (!match) {
       throw new Error(`Could not read the new case Id from ${this.page.url()}`);
     }
@@ -62,11 +63,9 @@ export class NewCaseModal {
   }
 
   async expectRequiredFieldError(fieldLabel: string): Promise<void> {
-    // Lightning shows a "We hit a snag." summary linking to the field, plus an inline error on it.
-    await expect(this.dialog.getByRole('heading', { name: 'We hit a snag.' })).toBeVisible();
-    await expect(this.dialog.getByRole('link', { name: fieldLabel, exact: true })).toBeVisible();
+    // The field is flagged inline in every org; some orgs also show a "We hit a snag." summary.
     await expect(this.dialog.getByRole('combobox', { name: fieldLabel })).toHaveAttribute('aria-invalid', 'true');
-    await expect(this.dialog.getByText('Complete this field.')).toBeVisible();
+    await expect(this.dialog.getByText('Complete this field.').first()).toBeVisible();
     await expect(this.dialog, 'The modal must stay open when validation fails').toBeVisible();
   }
 
