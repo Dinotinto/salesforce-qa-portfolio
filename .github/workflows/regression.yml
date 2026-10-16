@@ -38,6 +38,23 @@ jobs:
         with:
           auth-url: ${{ secrets.SF_AUTH_URL }}
 
+      # Sharing changes only take effect after a deploy commits (and recalculation
+      # runs), so Case OWD goes in first, on its own, before the tests that rely on it.
+      - name: Set Case sharing to Private
+        run: |
+          current() {
+            sf data query --query "SELECT InternalSharingModel FROM EntityDefinition WHERE QualifiedApiName = 'Case'" \
+              --target-org qa-org --json 2>/dev/null | jq -r '.result.records[0].InternalSharingModel // empty'
+          }
+          if [ "$(current)" = "Private" ]; then echo "Case sharing already Private"; exit 0; fi
+          sf project deploy start --metadata CustomObject:Case --target-org qa-org --test-level NoTestRun --wait 20 \
+            || { echo "::error::Couldn't deploy Case sharing settings"; exit 1; }
+          for i in $(seq 1 40); do
+            [ "$(current)" = "Private" ] && { echo "Case sharing is Private"; exit 0; }
+            echo "Waiting for sharing recalculation ($i)..."; sleep 15
+          done
+          echo "::error::Case sharing did not become Private within 10 minutes"; exit 1
+
       - name: Deploy metadata
         run: |
           TESTS=$(for t in $APEX_TESTS; do printf -- '--tests %s ' "$t"; done)
