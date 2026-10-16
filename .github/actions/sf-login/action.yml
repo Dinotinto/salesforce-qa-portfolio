@@ -48,7 +48,7 @@ runs:
         umask 077
         printf '%s' "$AUTH_URL" > "$RUNNER_TEMP/authurl"
         if ! sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/authurl" --alias "$ALIAS" --set-default --json > "$RUNNER_TEMP/login.json" 2>&1; then
-          MSG=$(jq -r '.message // .name // "unknown error"' "$RUNNER_TEMP/login.json" 2>/dev/null | head -c 400)
+          MSG=$( (jq -r '.message // .name // empty' "$RUNNER_TEMP/login.json" 2>/dev/null || grep -m1 -iE 'error|invalid|expired' "$RUNNER_TEMP/login.json" || echo "unknown error") | tr -d '\n' | sed 's/force:\/\/[^ ]*/[auth url]/g' | head -c 400 ) || MSG="unknown error"
           echo "::error::Salesforce login failed: ${MSG}"
           rm -f "$RUNNER_TEMP/authurl" "$RUNNER_TEMP/login.json"
           exit 1
