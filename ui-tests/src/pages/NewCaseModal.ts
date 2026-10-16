@@ -15,7 +15,10 @@ export class NewCaseModal {
 
   constructor(page: Page) {
     this.page = page;
-    this.dialog = page.getByRole('dialog', { name: 'New Case' });
+    // Matched by role attribute and title text rather than accessible name: when save fails,
+    // Lightning opens its error popover and the modal's computed name/visibility in the
+    // accessibility tree can change, even though the modal is still on screen.
+    this.dialog = page.locator('[role="dialog"]').filter({ hasText: 'New Case' }).first();
   }
 
   async open(): Promise<void> {
@@ -67,10 +70,11 @@ export class NewCaseModal {
     await expect(this.dialog.getByRole('combobox', { name: fieldLabel })).toHaveAttribute('aria-invalid', 'true');
     await expect(this.dialog.getByText('Complete this field.').first()).toBeVisible();
     await expect(this.dialog, 'The modal must stay open when validation fails').toBeVisible();
+    await expect(this.page, 'No record page should open').not.toHaveURL(/\/lightning\/r\//);
   }
 
   async cancel(): Promise<void> {
-    await this.dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await this.dialog.locator('button', { hasText: /^\s*Cancel\s*$/ }).first().click();
     await expect(this.dialog).toBeHidden();
   }
 }
