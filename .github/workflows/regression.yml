@@ -172,6 +172,22 @@ jobs:
       - name: Run Playwright
         run: npx playwright test
 
+      - name: Annotate UI failures
+        # Puts each failure's error text on the run summary, so it can be read without the logs.
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import re, xml.etree.ElementTree as ET
+          from pathlib import Path
+          p = Path("results/junit.xml")
+          if p.exists():
+              for case in ET.parse(p).iter("testcase"):
+                  for f in case.findall("failure"):
+                      text = re.sub(r"\x1b\[[0-9;]*m", "", (f.get("message") or "") + "\n" + (f.text or ""))
+                      body = text.strip()[:1500].replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+                      print(f"::error title=UI failure: {case.get('name')}::{body}")
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
